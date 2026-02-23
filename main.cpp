@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include "particle.h"
 #include "pathFinding.h"
 #include "robot.h"
@@ -200,6 +201,62 @@ void drawParticles()
     glEnable(GL_LIGHTING);
 }
 
+void drawText(float x, float y, const char* text)
+{
+    glRasterPos2f(x, y);
+    for (const char* c = text; *c; c++)
+    {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *c);
+    }
+}
+
+void drawHUD()
+{
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    char buffer[128];
+
+    sprintf(buffer, "Algorithm: %s", simState.useRRTStar ? "RRT*" : "A*");
+    drawText(10, WINDOW_HEIGHT - 25, buffer);
+
+    sprintf(buffer, "Particles: %d", simState.particlesSpawned);
+    drawText(10, WINDOW_HEIGHT - 50, buffer);
+
+    sprintf(buffer, "Path Steps: %d", (int)simState.currentPath.size());
+    drawText(10, WINDOW_HEIGHT - 75, buffer);
+
+    sprintf(buffer, "Time: %.2f s", simState.elapsedTime);
+    drawText(10, WINDOW_HEIGHT - 100, buffer);
+
+    sprintf(buffer, "Recomputes: %d", simState.pathUpdateCounter);
+    drawText(10, WINDOW_HEIGHT - 125, buffer);
+
+    sprintf(buffer, "Run: %d", simState.runCount);
+    drawText(10, WINDOW_HEIGHT - 150, buffer);
+
+    sprintf(buffer, "[P] Toggle Algorithm");
+    drawText(WINDOW_WIDTH - 180, WINDOW_HEIGHT - 25, buffer);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
 void display()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -214,6 +271,7 @@ void display()
     drawWireframeCube();
     drawParticles();
     drawPath();
+    drawHUD();
 
     glutSwapBuffers();
 }
@@ -267,9 +325,19 @@ void idle()
 
     updateRobotControl(simState);
 
+    if (simState.robotParticle >= 0 && simState.goalParticle >= 0 && !simState.goalReached)
+    {
+        simState.elapsedTime += timeStep;
+    }
+
     if (simState.goalReached)
     {
-        std::cout << "Resetting simulation..." << std::endl;
+        std::cout << "=== Run " << simState.runCount << " Complete ===" << std::endl;
+        std::cout << "Algorithm: " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
+        std::cout << "Time to goal: " << simState.elapsedTime << "s" << std::endl;
+        std::cout << "Path recomputes: " << simState.pathUpdateCounter << std::endl;
+        std::cout << "===========================" << std::endl;
+
         simState.reset();
         for (int i = 0; i < simState.targgetParticleCount; i++)
         {
@@ -343,6 +411,10 @@ void keyboard(unsigned char key, int x, int y)
     case 'r':
     case 'R':
         simState.reset();
+        for (int i = 0; i < simState.targgetParticleCount; i++)
+        {
+            simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
+        }
         frameCounter = 0;
         std::cout << "Simulation reset" << std::endl;
         break;
@@ -358,6 +430,19 @@ void keyboard(unsigned char key, int x, int y)
             }
         }
         std::cout << "Particles agitated" << std::endl;
+        break;
+
+    case 'p':
+    case 'P':
+        simState.useRRTStar = !simState.useRRTStar;
+        std::cout << "Switched to: " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
+        simState.reset();
+        for (int i = 0; i < simState.targgetParticleCount; i++)
+        {
+            simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
+        }
+        frameCounter = 0;
+        glutPostRedisplay();
         break;
     }
 }

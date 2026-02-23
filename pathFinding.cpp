@@ -5,6 +5,8 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <cstdlib>
+#include <limits>
 
 void worldToPathgrid(float x, float y, float z, int &gx, int &gy, int &gz)
 {
@@ -28,6 +30,39 @@ bool isOccupied(const SimulationState &simState, int gx, int gy, int gz)
     pathGridToWorld(gx, gy, gz, wx, wy, wz);
 
     float checkRadius = pathCellSize * 0.7f;
+
+    for (size_t i = 0; i < simState.particles.size(); i++)
+    {
+        if (!simState.particles[i].active)
+            continue;
+        if ((int)i == simState.robotParticle || (int)i == simState.goalParticle)
+            continue;
+
+        float dx = simState.particles[i].x - wx;
+        float dy = simState.particles[i].y - wy;
+        float dz = simState.particles[i].z - wz;
+        float distSq = dx * dx + dy * dy + dz * dz;
+
+        if (distSq < checkRadius * checkRadius)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool isOccupiedWorld(const SimulationState &simState, float wx, float wy, float wz)
+{
+    float halfSize = boxsize / 2.0f;
+    if (wx < -halfSize || wx > halfSize ||
+        wy < -halfSize || wy > halfSize ||
+        wz < -halfSize || wz > halfSize)
+    {
+        return true;
+    }
+
+    float checkRadius = particleRad * 2.0f;
 
     for (size_t i = 0; i < simState.particles.size(); i++)
     {
@@ -138,6 +173,185 @@ bool findPath(const SimulationState &simState, int startX, int startY, int start
     return false;
 }
 
+float distance3D(float x1, float y1, float z1, float x2, float y2, float z2)
+{
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float dz = z2 - z1;
+    return sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+bool isPathClear(const SimulationState &simState, float x1, float y1, float z1,
+                 float x2, float y2, float z2)
+{
+    float dist = distance3D(x1, y1, z1, x2, y2, z2);
+    int steps = (int)(dist / (particleRad * 2.0f)) + 1;
+
+    for (int i = 0; i <= steps; i++)
+    {
+        float t = (float)i / (float)steps;
+        float wx = x1 + t * (x2 - x1);
+        float wy = y1 + t * (y2 - y1);
+        float wz = z1 + t * (z2 - z1);
+
+        if (isOccupiedWorld(simState, wx, wy, wz))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+float randomFloat(float min, float max)
+{
+    return min + (float)rand() / (float)RAND_MAX * (max - min);
+}
+
+bool findPathRRTStar(const SimulationState &simState,
+                     float startX, float startY, float startZ,
+                     float goalX, float goalY, float goalZ,
+                     std::vector<std::vector<float>> &path)
+{
+    const int maxIterations = 2000;
+    const float stepSize = 0.3f;
+    const float goalRadius = 0.3f;
+    const float rewireRadius = 0.6f;
+    const float halfSize = boxsize / 2.0f;
+
+    std::vector<RRTNode> tree;
+    tree.push_back(RRTNode(startX, startY, startZ, 0.0f, -1));
+
+    int goalNodeIdx = -1;
+
+    for (int iter = 0; iter < maxIterations; iter++)
+    {
+        float randX, randY, randZ;
+
+        if (rand() % 10 == 0)
+        {
+            randX = goalX;
+            randY = goalY;
+            randZ = goalZ;
+        }
+        else
+        {
+            randX = randomFloat(-halfSize, halfSize);
+            randY = randomFloat(-halfSize, halfSize);
+            randZ = randomFloat(-halfSize, halfSize);
+        }
+
+        int nearestIdx = 0;
+        float nearestDist = std::numeric_limits<float>::max();
+
+        for (size_t i = 0; i < tree.size(); i++)
+        {
+            float d = distance3D(tree[i].x, tree[i].y, tree[i].z, randX, randY, randZ);
+            if (d < nearestDist)
+            {
+                nearestDist = d;
+                nearestIdx = (int)i;
+            }
+        }
+
+        float dx = randX - tree[nearestIdx].x;
+        float dy = randY - tree[nearestIdx].y;
+        float dz = randZ - tree[nearestIdx].z;
+        float dist = sqrt(dx * dx + dy * dy + dz * dz);
+
+        float newX, newY, newZ;
+        if (dist > stepSize)
+        {
+            newX = tree[nearestIdx].x + dx / dist * stepSize;
+            newY = tree[nearestIdx].y + dy / dist * stepSize;
+            newZ = tree[nearestIdx].z + dz / dist * stepSize;
+        }
+        else
+        {
+            newX = randX;
+            newY = randY;
+            newZ = randZ;
+        }
+
+        if (isOccupiedWorld(simState, newX, newY, newZ))
+            continue;
+
+        if (!isPathClear(simState, tree[nearestIdx].x, tree[nearestIdx].y, tree[nearestIdx].z,
+                         newX, newY, newZ))
+            continue;
+
+        std::vector<int> nearNodes;
+        for (size_t i = 0; i < tree.size(); i++)
+        {
+            float d = distance3D(tree[i].x, tree[i].y, tree[i].z, newX, newY, newZ);
+            if (d < rewireRadius)
+            {
+                nearNodes.push_back((int)i);
+            }
+        }
+
+        int bestParent = nearestIdx;
+        float bestCost = tree[nearestIdx].cost +
+                         distance3D(tree[nearestIdx].x, tree[nearestIdx].y, tree[nearestIdx].z,
+                                    newX, newY, newZ);
+
+        for (int idx : nearNodes)
+        {
+            float newCost = tree[idx].cost +
+                            distance3D(tree[idx].x, tree[idx].y, tree[idx].z, newX, newY, newZ);
+
+            if (newCost < bestCost &&
+                isPathClear(simState, tree[idx].x, tree[idx].y, tree[idx].z, newX, newY, newZ))
+            {
+                bestParent = idx;
+                bestCost = newCost;
+            }
+        }
+
+        int newNodeIdx = (int)tree.size();
+        tree.push_back(RRTNode(newX, newY, newZ, bestCost, bestParent));
+
+        for (int idx : nearNodes)
+        {
+            float rewireCost = bestCost +
+                               distance3D(newX, newY, newZ, tree[idx].x, tree[idx].y, tree[idx].z);
+
+            if (rewireCost < tree[idx].cost &&
+                isPathClear(simState, newX, newY, newZ, tree[idx].x, tree[idx].y, tree[idx].z))
+            {
+                tree[idx].parent = newNodeIdx;
+                tree[idx].cost = rewireCost;
+            }
+        }
+
+        float distToGoal = distance3D(newX, newY, newZ, goalX, goalY, goalZ);
+        if (distToGoal < goalRadius)
+        {
+            if (goalNodeIdx < 0 || tree[newNodeIdx].cost < tree[goalNodeIdx].cost)
+            {
+                goalNodeIdx = newNodeIdx;
+            }
+        }
+    }
+
+    if (goalNodeIdx < 0)
+    {
+        return false;
+    }
+
+    path.clear();
+    int currentIdx = goalNodeIdx;
+
+    while (currentIdx >= 0)
+    {
+        path.push_back({tree[currentIdx].x, tree[currentIdx].y, tree[currentIdx].z});
+        currentIdx = tree[currentIdx].parent;
+    }
+
+    std::reverse(path.begin(), path.end());
+    return true;
+}
+
 void updatePath(SimulationState &simState)
 {
     if (simState.robotParticle < 0 || simState.goalParticle < 0)
@@ -150,28 +364,43 @@ void updatePath(SimulationState &simState)
         return;
     }
 
-    int startGX, startGY, startGZ;
-    int goalGX, goalGY, goalGZ;
+    float startX = simState.particles[simState.robotParticle].x;
+    float startY = simState.particles[simState.robotParticle].y;
+    float startZ = simState.particles[simState.robotParticle].z;
 
-    worldToPathgrid(simState.particles[simState.robotParticle].x,
-                    simState.particles[simState.robotParticle].y,
-                    simState.particles[simState.robotParticle].z,
-                    startGX, startGY, startGZ);
+    float goalX = simState.particles[simState.goalParticle].x;
+    float goalY = simState.particles[simState.goalParticle].y;
+    float goalZ = simState.particles[simState.goalParticle].z;
 
-    worldToPathgrid(simState.particles[simState.goalParticle].x,
-                    simState.particles[simState.goalParticle].y,
-                    simState.particles[simState.goalParticle].z,
-                    goalGX, goalGY, goalGZ);
+    bool pathFound = false;
 
-    if (findPath(simState, startGX, startGY, startGZ,
-                 goalGX, goalGY, goalGZ, simState.currentPath))
+    if (simState.useRRTStar)
     {
-        simState.pathUpdateCounter++;
-        std::cout << "Path found " << simState.pathUpdateCounter << ": " << simState.currentPath.size() << " nodes" << std::endl;
+        pathFound = findPathRRTStar(simState, startX, startY, startZ,
+                                    goalX, goalY, goalZ, simState.currentPath);
     }
     else
     {
-        std::cout << "No path found " << std::endl;
+        int startGX, startGY, startGZ;
+        int goalGX, goalGY, goalGZ;
+
+        worldToPathgrid(startX, startY, startZ, startGX, startGY, startGZ);
+        worldToPathgrid(goalX, goalY, goalZ, goalGX, goalGY, goalGZ);
+
+        pathFound = findPath(simState, startGX, startGY, startGZ,
+                             goalGX, goalGY, goalGZ, simState.currentPath);
+    }
+
+    if (pathFound)
+    {
+        simState.pathUpdateCounter++;
+        std::cout << (simState.useRRTStar ? "RRT*" : "A*") << " path found "
+                  << simState.pathUpdateCounter << ": " << simState.currentPath.size()
+                  << " nodes" << std::endl;
+    }
+    else
+    {
+        std::cout << (simState.useRRTStar ? "RRT*" : "A*") << " no path found" << std::endl;
         simState.currentPath.clear();
     }
 }

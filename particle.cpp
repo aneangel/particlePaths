@@ -22,6 +22,8 @@ void SimulationState::reset()
     goalReached = false;
     initialAgitationDone = false;
     settlingFrames = 0;
+    elapsedTime = 0.0f;
+    runCount++;
 }
 
 int gridHash(int x, int y, int z)

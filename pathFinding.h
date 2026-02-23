@@ -1,9 +1,11 @@
+#ifndef PATHFINDING_H
+#define PATHFINDING_H
+
 #include "particle.h"
 #include <vector>
 #include <tuple>
 
 const float pathCellSize = 0.2f;
-// const int gridWidth = 26;
 
 struct pathNode
 {
@@ -18,6 +20,16 @@ struct pathNode
     {
         return f > other.f;
     }
+};
+
+struct RRTNode
+{
+    float x, y, z;
+    float cost;
+    int parent;
+
+    RRTNode(float px, float py, float pz, float c = 0.0f, int p = -1)
+        : x(px), y(py), z(pz), cost(c), parent(p) {}
 };
 
 struct Vec3Hash
@@ -35,9 +47,17 @@ void worldToPathgrid(float x, float u, float z, int &gx, int &gy, int &gz);
 void pathGridToWorld(int gx, int gy, int gz, float &x, float &y, float &z);
 
 bool isOccupied(const SimulationState &simState, int gx, int gy, int gz);
+bool isOccupiedWorld(const SimulationState &simState, float wx, float wy, float wz);
 float heuristic(int x1, int y1, int z1, int x2, int y2, int z2);
 
 bool findPath(const SimulationState &simState, int startX, int startY, int startZ,
               int goalX, int goalY, int goalZ, std::vector<std::vector<float>> &path);
 
+bool findPathRRTStar(const SimulationState &simState,
+                     float startX, float startY, float startZ,
+                     float goalX, float goalY, float goalZ,
+                     std::vector<std::vector<float>> &path);
+
 void updatePath(SimulationState &simState);
+
+#endif

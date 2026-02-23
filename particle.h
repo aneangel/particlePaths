@@ -56,6 +56,10 @@ struct SimulationState
     bool initialAgitationDone;
     int settlingFrames;
 
+    float elapsedTime;
+    bool useRRTStar;
+    int runCount;
+
     SimulationState()
         : particlesSpawned(0),
           targgetParticleCount(1500),
@@ -65,7 +69,10 @@ struct SimulationState
           pathUpdateCounter(0),
           goalReached(false),
           initialAgitationDone(false),
-          settlingFrames(0) {}
+          settlingFrames(0),
+          elapsedTime(0.0f),
+          useRRTStar(false),
+          runCount(0) {}
 
     void reset();
 };
