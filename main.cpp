@@ -82,12 +82,15 @@ void setMaterial(GLfloat r, GLfloat g, GLfloat b, GLfloat shininess)
     glMaterialf(GL_FRONT, GL_SHININESS, shininess);
 }
 
-void drawWireframeCube()
+GLuint cubeDisplayList;
+
+void buildCubeList()
 {
+    cubeDisplayList = glGenLists(1);
+    glNewList(cubeDisplayList, GL_COMPILE);
     glDisable(GL_LIGHTING);
     glColor3f(0.0f, 0.0f, 0.0f);
     glLineWidth(1.0f);
-
     float halfSize = boxsize / 2.0f;
 
     glBegin(GL_LINES);
@@ -130,8 +133,20 @@ void drawWireframeCube()
     glVertex3f(-halfSize, -halfSize, halfSize);
     glVertex3f(-halfSize, halfSize, halfSize);
     glEnd();
-
     glEnable(GL_LIGHTING);
+    glEndList();
+}
+
+void drawWireframeCube()
+{
+    glCallList(cubeDisplayList);
+    // glDisable(GL_LIGHTING);
+    // glColor3f(0.0f, 0.0f, 0.0f);
+    // glLineWidth(1.0f);
+
+    // float halfSize = boxsize / 2.0f;
+
+    //     glEnable(GL_LIGHTING);
 }
 
 void drawPath()
@@ -155,20 +170,36 @@ void drawPath()
 
 void drawParticles()
 {
+
+    float camX = cameraDistance * sin(cameraAngleY * M_PI / 180.0f) * cos(cameraAngleX * M_PI / 180.0f);
+    float camY = cameraDistance * sin(cameraAngleX * M_PI / 180.0f);
+    float camZ = cameraDistance * cos(cameraAngleY * M_PI / 180.0f) * cos(cameraAngleX * M_PI / 180.0f);
+
     for (size_t i = 0; i < simState.particles.size(); i++)
     {
         if (!simState.particles[i].active)
             continue;
-
         if ((int)i == simState.robotParticle || (int)i == simState.goalParticle)
             continue;
+
+        float dx = simState.particles[i].x - camX;
+        float dy = simState.particles[i].y - camY;
+        float dz = simState.particles[i].z - camZ;
+
+        float dist = sqrt(dx * dx + dy * dy + dz * dz);
+        int slices = (dist < 5.0f) ? 8 : (dist < 10.0f) ? 5
+                                                        : 3;
+        //     continue;
+
+        // if ((int)i == simState.robotParticle || (int)i == simState.goalParticle)
+        //     continue;
 
         glPushMatrix();
         float densityRatio = simState.particles[i].density / REST_DENISITY;
         float blue = 0.3f + 0.7f * std::min(densityRatio, 1.0f);
         setMaterial(0.2f, 0.5f, blue, 50.0f);
         glTranslatef(simState.particles[i].x, simState.particles[i].y, simState.particles[i].z);
-        glutSolidSphere(particleRad, 8, 8);
+        glutSolidSphere(particleRad, slices, slices);
         glPopMatrix();
     }
 
@@ -201,10 +232,10 @@ void drawParticles()
     glEnable(GL_LIGHTING);
 }
 
-void drawText(float x, float y, const char* text)
+void drawText(float x, float y, const char *text)
 {
     glRasterPos2f(x, y);
-    for (const char* c = text; *c; c++)
+    for (const char *c = text; *c; c++)
     {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *c);
     }
@@ -504,6 +535,9 @@ void motion(int x, int y)
 
 void initSimulation()
 {
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+
     glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
     simState.reset();
 
