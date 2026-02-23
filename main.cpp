@@ -7,9 +7,10 @@
 #include "particle.h"
 #include "pathFinding.h"
 #include "robot.h"
+#include "gpu_renderer.h"
 
-const int WINDOW_WIDTH = 800;
-const int WINDOW_HEIGHT = 600;
+const int WINDOW_WIDTH = 1000;
+const int WINDOW_HEIGHT = 800;
 
 float cameraAngleX = 30.0f;
 float cameraAngleY = 45.0f;
@@ -170,6 +171,11 @@ void drawPath()
 
 void drawParticles()
 {
+    if (GPUinstance)
+    {
+        drawGPU(simState.particles, simState.robotParticle, simState.goalParticle);
+        return;
+    }
 
     float camX = cameraDistance * sin(cameraAngleY * M_PI / 180.0f) * cos(cameraAngleX * M_PI / 180.0f);
     float camY = cameraDistance * sin(cameraAngleX * M_PI / 180.0f);
@@ -195,9 +201,7 @@ void drawParticles()
         //     continue;
 
         glPushMatrix();
-        float densityRatio = simState.particles[i].density / REST_DENISITY;
-        float blue = 0.3f + 0.7f * std::min(densityRatio, 1.0f);
-        setMaterial(0.2f, 0.5f, blue, 50.0f);
+        setMaterial(0.88f, 0.94f, 1.0f, 80.0f); // white/light blue
         glTranslatef(simState.particles[i].x, simState.particles[i].y, simState.particles[i].z);
         glutSolidSphere(particleRad, slices, slices);
         glPopMatrix();
@@ -210,7 +214,7 @@ void drawParticles()
     if (simState.robotParticle >= 0 && simState.particles[simState.robotParticle].active)
     {
         glPushMatrix();
-        glColor3f(0.0f, 1.0f, 0.0f);
+        glColor3f(1.0f, 1.0f, 1.0f); // white
         glTranslatef(simState.particles[simState.robotParticle].x,
                      simState.particles[simState.robotParticle].y,
                      simState.particles[simState.robotParticle].z);
@@ -409,6 +413,7 @@ void keyboard(unsigned char key, int x, int y)
     case 'Q':
     case 27: // ESC
         glutIdleFunc(nullptr);
+        cleanupGPU();
         exit(0);
         break;
 
@@ -584,6 +589,7 @@ int main(int argc, char **argv)
     glutCreateWindow("Particle System with Dynamic Pathfinding");
 
     glewInit();
+    GPUinstance = initGPU();
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_COLOR_MATERIAL);
