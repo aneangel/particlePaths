@@ -1,22 +1,34 @@
 #include <GL/glew.h>
 #include <GL/glut.h>
+
 #include <iostream>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <chrono>
+#include <thread>
+#include <atomic>
+#include <mutex>
+
 #include "particle.h"
 #include "pathFinding.h"
 #include "robot.h"
 #include "gpu_renderer.h"
 
-const int WINDOW_WIDTH = 1000;
-const int WINDOW_HEIGHT = 800;
+const int WINDOW_WIDTH = 1500;
+const int WINDOW_HEIGHT = 1300;
 
 float cameraAngleX = 30.0f;
 float cameraAngleY = 45.0f;
 float cameraDistance = 10.0f;
 
 bool mouseLeftDown = false;
+
+static std::mutex g_pathMutex;
+static std::atomic<bool> g_plannerRunning{false};
+static std::vector<std::vector<float>> g_pendingPath;
+static std::atomic<bool> g_pathReady{false};
+
 int mouseX = 0;
 int mouseY = 0;
 
@@ -150,9 +162,33 @@ void drawWireframeCube()
     //     glEnable(GL_LIGHTING);
 }
 
+void launchPlannerAsync()
+{
+    if (g_plannerRunning.exchange(true))
+        return;
+
+    SimulationState snap = simState;
+    std::thread([snap = std::move(snap)]() mutable
+                {
+        updatePath(snap);
+        {
+            std::lock_guard<std::mutex> lk(g_pathMutex);
+            g_pendingPath = snap.currentPath;
+        }
+        g_pathReady = true;
+        g_plannerRunning = false; })
+        .detach();
+}
+
 void drawPath()
 {
-    if (simState.currentPath.empty())
+    std::vector<std::vector<float>> path;
+    {
+        std::lock_guard<std::mutex> lk(g_pathMutex);
+        path = simState.currentPath;
+    }
+
+    if (path.empty())
         return;
 
     glDisable(GL_LIGHTING);
@@ -160,7 +196,7 @@ void drawPath()
     glLineWidth(3.0f);
 
     glBegin(GL_LINE_STRIP);
-    for (const auto &point : simState.currentPath)
+    for (const auto &point : path)
     {
         glVertex3f(point[0], point[1], point[2]);
     }
@@ -349,6 +385,19 @@ void agitateParticles()
 
 void idle()
 {
+    static auto lastTick = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    float dt = std::chrono::duration<float>(now - lastTick).count();
+    if (dt < timeStep)
+        return;
+    lastTick = now;
+
+    if (g_pathReady.exchange(false))
+    {
+        std::lock_guard<std::mutex> lk(g_pathMutex);
+        simState.currentPath = g_pendingPath;
+    }
+
     updatePhysics(simState);
     initializeRobotAndGoal(simState);
 
@@ -396,7 +445,7 @@ void idle()
     if (frameCounter >= 10)
     {
         frameCounter = 0;
-        updatePath(simState);
+        launchPlannerAsync();
     }
 
     glutPostRedisplay();

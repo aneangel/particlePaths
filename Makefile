@@ -1,6 +1,6 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Wno-deprecated-declarations
-LDFLAGS := -lGLEW -lGL -lGLU -lglut
+CXXFLAGS := -std=c++17 -O3 -march=native -Wall -Wextra -Wno-deprecated-declarations
+LDFLAGS := -lGLEW -lGL -lGLU -lglut -pthread
 
 # Targets
 TARGET1 := physicssim
