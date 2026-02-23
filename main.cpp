@@ -241,6 +241,9 @@ void drawText(float x, float y, const char *text)
     }
 }
 
+static char hudAlgorithm[64], hudParticles[64], hudPath[64], hudTime[64], hudRecomp[64], hudRunNum[64];
+static int hudUpdateCntr;
+
 void drawHUD()
 {
     glMatrixMode(GL_PROJECTION);
@@ -256,28 +259,36 @@ void drawHUD()
 
     glColor3f(1.0f, 1.0f, 1.0f);
 
-    char buffer[128];
+    // char buffer[128];
 
-    sprintf(buffer, "Algorithm: %s", simState.useRRTStar ? "RRT*" : "A*");
-    drawText(10, WINDOW_HEIGHT - 25, buffer);
+    if (hudUpdateCntr++ % 10 == 0)
+    {
+        sprintf(hudAlgorithm, "Algorithm: %s", simState.useRRTStar ? "RRT*" : "A*");
+        sprintf(hudParticles, "Particles: %d", simState.particlesSpawned);
+        sprintf(hudPath, "Path Steps: %d", (int)simState.currentPath.size());
+        sprintf(hudTime, "Time: %.2f s", simState.elapsedTime);
+        sprintf(hudRecomp, "Recomputes: %d", simState.pathUpdateCounter);
+        sprintf(hudRunNum, "Run: %d", simState.runCount);
+    }
 
-    sprintf(buffer, "Particles: %d", simState.particlesSpawned);
-    drawText(10, WINDOW_HEIGHT - 50, buffer);
+    // sprintf(buffer, "Algorithm: %s", simState.useRRTStar ? "RRT*" : "A*");
+    drawText(10, WINDOW_HEIGHT - 25, hudAlgorithm);
 
-    sprintf(buffer, "Path Steps: %d", (int)simState.currentPath.size());
-    drawText(10, WINDOW_HEIGHT - 75, buffer);
+    // sprintf(buffer, "Particles: %d", simState.particlesSpawned);
+    drawText(10, WINDOW_HEIGHT - 50, hudParticles);
 
-    sprintf(buffer, "Time: %.2f s", simState.elapsedTime);
-    drawText(10, WINDOW_HEIGHT - 100, buffer);
+    // sprintf(buffer, "Path Steps: %d", (int)simState.currentPath.size());
+    drawText(10, WINDOW_HEIGHT - 75, hudPath);
 
-    sprintf(buffer, "Recomputes: %d", simState.pathUpdateCounter);
-    drawText(10, WINDOW_HEIGHT - 125, buffer);
+    // sprintf(buffer, "Time: %.2f s", simState.elapsedTime);
+    drawText(10, WINDOW_HEIGHT - 100, hudTime);
 
-    sprintf(buffer, "Run: %d", simState.runCount);
-    drawText(10, WINDOW_HEIGHT - 150, buffer);
+    // sprintf(buffer, "Recomputes: %d", simState.pathUpdateCounter);
+    drawText(10, WINDOW_HEIGHT - 125, hudRecomp);
 
-    sprintf(buffer, "[P] Toggle Algorithm");
-    drawText(WINDOW_WIDTH - 180, WINDOW_HEIGHT - 25, buffer);
+    // sprintf(buffer, "Run: %d", simState.runCount);
+    drawText(10, WINDOW_HEIGHT - 150, hudRunNum);
+    drawText(WINDOW_WIDTH - 180, WINDOW_HEIGHT - 25, "[P] Toggle Algorithm");
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
