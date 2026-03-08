@@ -180,6 +180,33 @@ void launchPlannerAsync()
         .detach();
 }
 
+void drawObstacles()
+{
+    for (const auto &obs : simState.obstacles)
+    {
+        float x0 = obs.cx - obs.hx, x1 = obs.cx + obs.hx;
+        float y0 = obs.cy - obs.hy, y1 = obs.cy + obs.hy;
+        float z0 = obs.cz - obs.hz, z1 = obs.cz + obs.hz;
+
+        setMaterial(0.85f, 0.1f, 0.1f, 40.0f);
+
+        glBegin(GL_QUADS);
+        // -Y
+        glNormal3f( 0,-1, 0); glVertex3f(x0,y0,z0); glVertex3f(x1,y0,z0); glVertex3f(x1,y0,z1); glVertex3f(x0,y0,z1);
+        // +Y
+        glNormal3f( 0, 1, 0); glVertex3f(x0,y1,z0); glVertex3f(x0,y1,z1); glVertex3f(x1,y1,z1); glVertex3f(x1,y1,z0);
+        // -X
+        glNormal3f(-1, 0, 0); glVertex3f(x0,y0,z0); glVertex3f(x0,y0,z1); glVertex3f(x0,y1,z1); glVertex3f(x0,y1,z0);
+        // +X
+        glNormal3f( 1, 0, 0); glVertex3f(x1,y0,z0); glVertex3f(x1,y1,z0); glVertex3f(x1,y1,z1); glVertex3f(x1,y0,z1);
+        // -Z
+        glNormal3f( 0, 0,-1); glVertex3f(x0,y0,z0); glVertex3f(x0,y1,z0); glVertex3f(x1,y1,z0); glVertex3f(x1,y0,z0);
+        // +Z
+        glNormal3f( 0, 0, 1); glVertex3f(x0,y0,z1); glVertex3f(x1,y0,z1); glVertex3f(x1,y1,z1); glVertex3f(x0,y1,z1);
+        glEnd();
+    }
+}
+
 void drawPath()
 {
     std::vector<std::vector<float>> path;
@@ -351,6 +378,7 @@ void display()
     gluLookAt(camX, camY, camZ, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 
     drawWireframeCube();
+    drawObstacles();
     drawParticles();
     drawPath();
     drawHUD();

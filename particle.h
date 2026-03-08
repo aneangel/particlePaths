@@ -23,6 +23,22 @@ const float gravity = -9.8f;
 const float damping = 0.5f;
 const float timeStep = 0.020f;
 
+struct Obstacle
+{
+    float cx, cy, cz;
+    float hx, hy, hz;
+
+    Obstacle(float cx, float cy, float cz, float hx, float hy, float hz)
+        : cx(cx), cy(cy), cz(cz), hx(hx), hy(hy), hz(hz) {}
+
+    bool contains(float x, float y, float z) const
+    {
+        return x >= cx - hx && x <= cx + hx &&
+               y >= cy - hy && y <= cy + hy &&
+               z >= cz - hz && z <= cz + hz;
+    }
+};
+
 struct Particle
 {
     float x, y, z;
@@ -41,6 +57,7 @@ struct SimulationState
 {
     std::vector<Particle> particles;
     std::vector<std::vector<int>> grid;
+    std::vector<Obstacle> obstacles;
 
     int particlesSpawned;
     int targgetParticleCount;
@@ -72,7 +89,10 @@ struct SimulationState
           settlingFrames(0),
           elapsedTime(0.0f),
           useRRTStar(false),
-          runCount(0) {}
+          runCount(0)
+    {
+        obstacles.emplace_back(0.0f,0.5f, 0.0f, 0.5f, 0.5f, 0.5f);
+    }
 
     void reset();
 };
