@@ -322,6 +322,80 @@ void updatePhysics(SimulationState &simState)
             p.z = halfSize - particleRad;
             p.vz *= -damping;
         }
+
+        // check collision against each static obstacle 
+        for (const auto &obs : simState.obstacles)
+        {
+            // the nearest point on (or inside) the obstacle surface to this particle
+            // minimum overlap axis strategy: it measures how far the particle is from each face of the box 
+            // picks the axis where the overlap is smallest , and pushes out along that axis. 
+            float closestX = std::max(obs.cx - obs.hx, std::min(p.x, obs.cx + obs.hx));
+            float closestY = std::max(obs.cy - obs.hy, std::min(p.y, obs.cy + obs.hy));
+            float closestZ = std::max(obs.cz - obs.hz, std::min(p.z, obs.cz + obs.hz));
+
+            float dx = p.x - closestX;
+            float dy = p.y - closestY;
+            float dz = p.z - closestZ;
+            float distSq = dx * dx + dy * dy + dz * dz;
+
+            if (distSq < particleRad * particleRad)
+            {
+                float nx, ny, nz;
+                float penetration;
+
+                if (distSq < 0.0001f)
+                {
+                   
+                    float overlapX = obs.hx - std::abs(p.x - obs.cx);
+                    float overlapY = obs.hy - std::abs(p.y - obs.cy);
+                    float overlapZ = obs.hz - std::abs(p.z - obs.cz);
+
+                    if (overlapX <= overlapY && overlapX <= overlapZ)
+                    {
+                        nx = (p.x < obs.cx) ? -1.0f : 1.0f;
+                        ny = nz = 0.0f;
+                        penetration = overlapX + particleRad;
+                    }
+                    else if (overlapY <= overlapZ)
+                    {
+                        ny = (p.y < obs.cy) ? -1.0f : 1.0f;
+                        nx = nz = 0.0f;
+                        penetration = overlapY + particleRad;
+                    }
+                    else
+                    {
+                        nz = (p.z < obs.cz) ? -1.0f : 1.0f;
+                        nx = ny = 0.0f;
+                        penetration = overlapZ + particleRad;
+                    }
+                }
+                else
+                // normalize dx/dy/dz
+                // move the particle out of the obstacle
+                // Velocity reflection
+                {
+                    
+                    float dist = std::sqrt(distSq);
+                    nx = dx / dist;
+                    ny = dy / dist;
+                    nz = dz / dist;
+                    penetration = particleRad - dist;
+                }
+
+                p.x += nx * penetration;
+                p.y += ny * penetration;
+                p.z += nz * penetration;
+
+                // velocity reflection
+                float vdotn = p.vx * nx + p.vy * ny + p.vz * nz;
+                if (vdotn < 0.0f)
+                {
+                    p.vx -= (1.0f + damping) * vdotn * nx;
+                    p.vy -= (1.0f + damping) * vdotn * ny;
+                    p.vz -= (1.0f + damping) * vdotn * nz;
+                }
+            }
+        }
     }
 
     resolveCollisions(simState);

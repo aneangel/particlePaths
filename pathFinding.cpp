@@ -29,6 +29,14 @@ bool isOccupied(const SimulationState &simState, int gx, int gy, int gz)
     float wx, wy, wz;
     pathGridToWorld(gx, gy, gz, wx, wy, wz);
 
+    for (const auto &obs : simState.obstacles)
+    {
+        if (wx >= obs.cx - obs.hx - pathCellSize && wx <= obs.cx + obs.hx + pathCellSize &&
+            wy >= obs.cy - obs.hy - pathCellSize && wy <= obs.cy + obs.hy + pathCellSize &&
+            wz >= obs.cz - obs.hz - pathCellSize && wz <= obs.cz + obs.hz + pathCellSize)
+            return true;
+    }
+
     float checkRadius = pathCellSize * 0.7f;
 
     for (size_t i = 0; i < simState.particles.size(); i++)
@@ -60,6 +68,12 @@ bool isOccupiedWorld(const SimulationState &simState, float wx, float wy, float 
         wz < -halfSize || wz > halfSize)
     {
         return true;
+    }
+
+    for (const auto &obs : simState.obstacles)
+    {
+        if (obs.contains(wx, wy, wz))
+            return true;
     }
 
     float checkRadius = particleRad * 2.0f;
