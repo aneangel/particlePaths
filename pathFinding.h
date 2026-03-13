@@ -6,6 +6,7 @@
 #include <tuple>
 
 const float pathCellSize = 0.2f;
+extern int pathGridDim;
 
 struct pathNode
 {

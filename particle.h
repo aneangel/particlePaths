@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <cmath>
+#include "metrics.h"
 
 const float H = 0.15f;
 const float HSQ = H * H;
@@ -15,9 +16,9 @@ const float SPIKY_GRAD = -45.0f / (M_PI * pow(H, 6));
 const float VISC_LAP = 45.0f / (M_PI * pow(H, 6));
 
 const float cellSize = H;
-const int gridWidth = 35;
+extern float boxsize;
+extern int gridWidth;
 
-const float boxsize = 5.0f;
 const float particleRad = 0.05f;
 const float gravity = -9.8f;
 const float damping = 0.5f;
@@ -27,9 +28,13 @@ struct Obstacle
 {
     float cx, cy, cz;
     float hx, hy, hz;
+    float vx, vy, vz;
 
-    Obstacle(float cx, float cy, float cz, float hx, float hy, float hz)
-        : cx(cx), cy(cy), cz(cz), hx(hx), hy(hy), hz(hz) {}
+    Obstacle(float cx, float cy, float cz,
+             float hx, float hy, float hz,
+             float vx = 0.0f, float vy = 0.0f, float vz = 0.0f)
+        : cx(cx), cy(cy), cz(cz), hx(hx), hy(hy), hz(hz),
+          vx(vx), vy(vy), vz(vz) {}
 
     bool contains(float x, float y, float z) const
     {
@@ -77,10 +82,13 @@ struct SimulationState
     bool useRRTStar;
     int runCount;
 
+    Scenario currentScenario;
+    std::vector<ReplanEvent> replanLog;
+
     SimulationState()
         : particlesSpawned(0),
           targgetParticleCount(1500),
-          spawnY(boxsize / 2.0f - 0.5f),
+          spawnY(0.0f),
           robotParticle(-1),
           goalParticle(-1),
           pathUpdateCounter(0),
@@ -89,9 +97,9 @@ struct SimulationState
           settlingFrames(0),
           elapsedTime(0.0f),
           useRRTStar(false),
-          runCount(0)
+          runCount(0),
+          currentScenario(Scenario::DYNAMIC_OBSTACLES)
     {
-        obstacles.emplace_back(0.0f,0.5f, 0.0f, 0.5f, 0.5f, 0.5f);
     }
 
     void reset();
@@ -99,6 +107,7 @@ struct SimulationState
 
 extern SimulationState simState;
 
+void updateObstacles(SimulationState &simState);
 void spawnParticles(SimulationState &simState);
 void buildSpatialGrid(SimulationState &simState);
 void findNeighbors(SimulationState &simState, size_t particleIdx, std::vector<int> &neighbors);

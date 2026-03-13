@@ -63,6 +63,7 @@ void initializeRobotAndGoal(SimulationState &simState)
 
     std::cout << "Robot initialized at particle index " << simState.robotParticle << " (fallback)" << std::endl;
     std::cout << "Goal initialized at particle index " << simState.goalParticle << " (fallback)" << std::endl;
+    // aiv
 }
 
 void steerTowardsTarget(Particle &robot, float targetX, float targetY, float targetZ)

@@ -1,5 +1,7 @@
 #include "pathFinding.h"
 #include <queue>
+
+int pathGridDim = 25;
 #include <unordered_map>
 #include <unordered_set>
 #include <cmath>
@@ -7,6 +9,44 @@
 #include <iostream>
 #include <cstdlib>
 #include <limits>
+#include <chrono>
+
+static float computePathLength(const std::vector<std::vector<float>> &path)
+{
+    float len = 0.0f;
+    for (size_t i = 1; i < path.size(); i++)
+    {
+        float dx = path[i][0] - path[i - 1][0];
+        float dy = path[i][1] - path[i - 1][1];
+        float dz = path[i][2] - path[i - 1][2];
+        len += std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    return len;
+}
+
+static float computePathDivergence(
+    const std::vector<std::vector<float>> &oldPath,
+    const std::vector<std::vector<float>> &newPath)
+{
+    if (oldPath.empty() || newPath.empty())
+        return 0.0f;
+    float total = 0.0f;
+    for (const auto &wp : oldPath)
+    {
+        float minD = std::numeric_limits<float>::max();
+        for (const auto &nwp : newPath)
+        {
+            float dx = wp[0] - nwp[0];
+            float dy = wp[1] - nwp[1];
+            float dz = wp[2] - nwp[2];
+            float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (d < minD)
+                minD = d;
+        }
+        total += minD;
+    }
+    return total / (float)oldPath.size();
+}
 
 void worldToPathgrid(float x, float y, float z, int &gx, int &gy, int &gz)
 {
@@ -156,9 +196,9 @@ bool findPath(const SimulationState &simState, int startX, int startY, int start
                     int ny = current.y + dy;
                     int nz = current.z + dz;
 
-                    if (nx < 0 || nx >= gridWidth ||
-                        ny < 0 || ny >= gridWidth ||
-                        nz < 0 || nz >= gridWidth)
+                    if (nx < 0 || nx >= pathGridDim ||
+                        ny < 0 || ny >= pathGridDim ||
+                        nz < 0 || nz >= pathGridDim)
                         continue;
 
                     auto neighborTuple = std::make_tuple(nx, ny, nz);
@@ -369,23 +409,24 @@ bool findPathRRTStar(const SimulationState &simState,
 void updatePath(SimulationState &simState)
 {
     if (simState.robotParticle < 0 || simState.goalParticle < 0)
-    {
         return;
-    }
 
-    if (!simState.particles[simState.robotParticle].active || !simState.particles[simState.goalParticle].active)
-    {
+    if (!simState.particles[simState.robotParticle].active ||
+        !simState.particles[simState.goalParticle].active)
         return;
-    }
 
     float startX = simState.particles[simState.robotParticle].x;
     float startY = simState.particles[simState.robotParticle].y;
     float startZ = simState.particles[simState.robotParticle].z;
-
     float goalX = simState.particles[simState.goalParticle].x;
     float goalY = simState.particles[simState.goalParticle].y;
     float goalZ = simState.particles[simState.goalParticle].z;
 
+    // Save old path for divergence measurement
+    std::vector<std::vector<float>> oldPath = simState.currentPath;
+
+    // ── Timed planning call ───────────────────────────────────────────────────
+    auto t0 = std::chrono::high_resolution_clock::now();
     bool pathFound = false;
 
     if (simState.useRRTStar)
@@ -395,26 +436,28 @@ void updatePath(SimulationState &simState)
     }
     else
     {
-        int startGX, startGY, startGZ;
-        int goalGX, goalGY, goalGZ;
-
+        int startGX, startGY, startGZ, goalGX, goalGY, goalGZ;
         worldToPathgrid(startX, startY, startZ, startGX, startGY, startGZ);
         worldToPathgrid(goalX, goalY, goalZ, goalGX, goalGY, goalGZ);
-
         pathFound = findPath(simState, startGX, startGY, startGZ,
                              goalGX, goalGY, goalGZ, simState.currentPath);
     }
 
-    if (pathFound)
-    {
-        simState.pathUpdateCounter++;
-        std::cout << (simState.useRRTStar ? "RRT*" : "A*") << " path found "
-                  << simState.pathUpdateCounter << ": " << simState.currentPath.size()
-                  << " nodes" << std::endl;
-    }
-    else
-    {
-        std::cout << (simState.useRRTStar ? "RRT*" : "A*") << " no path found" << std::endl;
+    auto t1 = std::chrono::high_resolution_clock::now();
+    long long planUs = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    // ─────────────────────────────────────────────────────────────────────────
+
+    if (!pathFound)
         simState.currentPath.clear();
-    }
+
+    // ── Record metrics ────────────────────────────────────────────────────────
+    ReplanEvent ev{};
+    ev.timestamp = simState.elapsedTime;
+    ev.planTimeUs = planUs;
+    ev.pathFound = pathFound;
+    ev.pathLength = computePathLength(simState.currentPath);
+    ev.pathNodes = (int)simState.currentPath.size();
+    ev.pathDivergence = computePathDivergence(oldPath, simState.currentPath);
+    simState.replanLog.push_back(ev);
+    // ─────────────────────────────────────────────────────────────────────────
 }

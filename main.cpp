@@ -14,6 +14,16 @@
 #include "pathFinding.h"
 #include "robot.h"
 #include "gpu_renderer.h"
+#include "metrics.h"
+
+static const std::string CSV_FILE = "results.csv";
+void initScaleFromParticleCount(int n)
+{
+    float scale = std::cbrt((float)n / 1500.0f);
+    boxsize = 5.0f * scale;
+    gridWidth = std::max(35, (int)(boxsize / cellSize) + 2);
+    pathGridDim = std::max(25, (int)(boxsize / pathCellSize));
+}
 
 const int WINDOW_WIDTH = 1500;
 const int WINDOW_HEIGHT = 1300;
@@ -27,6 +37,7 @@ bool mouseLeftDown = false;
 static std::mutex g_pathMutex;
 static std::atomic<bool> g_plannerRunning{false};
 static std::vector<std::vector<float>> g_pendingPath;
+static ReplanEvent g_pendingEvent{};
 static std::atomic<bool> g_pathReady{false};
 
 int mouseX = 0;
@@ -168,12 +179,15 @@ void launchPlannerAsync()
         return;
 
     SimulationState snap = simState;
+    snap.replanLog.clear(); // only want the single new event from this call
+
     std::thread([snap = std::move(snap)]() mutable
                 {
         updatePath(snap);
         {
             std::lock_guard<std::mutex> lk(g_pathMutex);
             g_pendingPath = snap.currentPath;
+            g_pendingEvent = snap.replanLog.empty() ? ReplanEvent{} : snap.replanLog.back();
         }
         g_pathReady = true;
         g_plannerRunning = false; })
@@ -188,21 +202,46 @@ void drawObstacles()
         float y0 = obs.cy - obs.hy, y1 = obs.cy + obs.hy;
         float z0 = obs.cz - obs.hz, z1 = obs.cz + obs.hz;
 
+        glColor3f(0.85f, 0.1f, 0.1f);
         setMaterial(0.85f, 0.1f, 0.1f, 40.0f);
 
         glBegin(GL_QUADS);
         // -Y
-        glNormal3f( 0,-1, 0); glVertex3f(x0,y0,z0); glVertex3f(x1,y0,z0); glVertex3f(x1,y0,z1); glVertex3f(x0,y0,z1);
+        glNormal3f(0, -1, 0);
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x0, y0, z1);
         // +Y
-        glNormal3f( 0, 1, 0); glVertex3f(x0,y1,z0); glVertex3f(x0,y1,z1); glVertex3f(x1,y1,z1); glVertex3f(x1,y1,z0);
+        glNormal3f(0, 1, 0);
+        glVertex3f(x0, y1, z0);
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x1, y1, z0);
         // -X
-        glNormal3f(-1, 0, 0); glVertex3f(x0,y0,z0); glVertex3f(x0,y0,z1); glVertex3f(x0,y1,z1); glVertex3f(x0,y1,z0);
+        glNormal3f(-1, 0, 0);
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x0, y0, z1);
+        glVertex3f(x0, y1, z1);
+        glVertex3f(x0, y1, z0);
         // +X
-        glNormal3f( 1, 0, 0); glVertex3f(x1,y0,z0); glVertex3f(x1,y1,z0); glVertex3f(x1,y1,z1); glVertex3f(x1,y0,z1);
+        glNormal3f(1, 0, 0);
+        glVertex3f(x1, y0, z0);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x1, y0, z1);
         // -Z
-        glNormal3f( 0, 0,-1); glVertex3f(x0,y0,z0); glVertex3f(x0,y1,z0); glVertex3f(x1,y1,z0); glVertex3f(x1,y0,z0);
+        glNormal3f(0, 0, -1);
+        glVertex3f(x0, y0, z0);
+        glVertex3f(x0, y1, z0);
+        glVertex3f(x1, y1, z0);
+        glVertex3f(x1, y0, z0);
         // +Z
-        glNormal3f( 0, 0, 1); glVertex3f(x0,y0,z1); glVertex3f(x1,y0,z1); glVertex3f(x1,y1,z1); glVertex3f(x0,y1,z1);
+        glNormal3f(0, 0, 1);
+        glVertex3f(x0, y0, z1);
+        glVertex3f(x1, y0, z1);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x0, y1, z1);
         glEnd();
     }
 }
@@ -308,7 +347,8 @@ void drawText(float x, float y, const char *text)
     }
 }
 
-static char hudAlgorithm[64], hudParticles[64], hudPath[64], hudTime[64], hudRecomp[64], hudRunNum[64];
+static char hudScenario[64], hudAlgorithm[64], hudParticles[64];
+static char hudPath[64], hudTime[64], hudRecomp[64], hudPlanTime[64], hudRunNum[64];
 static int hudUpdateCntr;
 
 void drawHUD()
@@ -323,39 +363,53 @@ void drawHUD()
 
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
-
     glColor3f(1.0f, 1.0f, 1.0f);
-
-    // char buffer[128];
 
     if (hudUpdateCntr++ % 10 == 0)
     {
+        sprintf(hudScenario, "Scenario: %s", scenarioLabel(simState.currentScenario));
         sprintf(hudAlgorithm, "Algorithm: %s", simState.useRRTStar ? "RRT*" : "A*");
         sprintf(hudParticles, "Particles: %d", simState.particlesSpawned);
         sprintf(hudPath, "Path Steps: %d", (int)simState.currentPath.size());
         sprintf(hudTime, "Time: %.2f s", simState.elapsedTime);
-        sprintf(hudRecomp, "Recomputes: %d", simState.pathUpdateCounter);
+        sprintf(hudRecomp, "Replans: %d", simState.pathUpdateCounter);
         sprintf(hudRunNum, "Run: %d", simState.runCount);
+
+        if (!simState.replanLog.empty())
+        {
+            long long lastUs = simState.replanLog.back().planTimeUs;
+            long long sumUs = 0;
+            for (const auto &e : simState.replanLog)
+                sumUs += e.planTimeUs;
+            long long avgUs = sumUs / (long long)simState.replanLog.size();
+            sprintf(hudPlanTime, "Plan: last=%lldus avg=%lldus", lastUs, avgUs);
+        }
+        else
+            sprintf(hudPlanTime, "Plan: --");
     }
 
-    // sprintf(buffer, "Algorithm: %s", simState.useRRTStar ? "RRT*" : "A*");
-    drawText(10, WINDOW_HEIGHT - 25, hudAlgorithm);
+    int y = WINDOW_HEIGHT - 25;
+    drawText(10, y, hudScenario);
+    y -= 25;
+    drawText(10, y, hudAlgorithm);
+    y -= 25;
+    drawText(10, y, hudParticles);
+    y -= 25;
+    drawText(10, y, hudTime);
+    y -= 25;
+    drawText(10, y, hudPath);
+    y -= 25;
+    drawText(10, y, hudRecomp);
+    y -= 25;
+    drawText(10, y, hudPlanTime);
+    y -= 25;
+    drawText(10, y, hudRunNum);
 
-    // sprintf(buffer, "Particles: %d", simState.particlesSpawned);
-    drawText(10, WINDOW_HEIGHT - 50, hudParticles);
-
-    // sprintf(buffer, "Path Steps: %d", (int)simState.currentPath.size());
-    drawText(10, WINDOW_HEIGHT - 75, hudPath);
-
-    // sprintf(buffer, "Time: %.2f s", simState.elapsedTime);
-    drawText(10, WINDOW_HEIGHT - 100, hudTime);
-
-    // sprintf(buffer, "Recomputes: %d", simState.pathUpdateCounter);
-    drawText(10, WINDOW_HEIGHT - 125, hudRecomp);
-
-    // sprintf(buffer, "Run: %d", simState.runCount);
-    drawText(10, WINDOW_HEIGHT - 150, hudRunNum);
-    drawText(WINDOW_WIDTH - 180, WINDOW_HEIGHT - 25, "[P] Toggle Algorithm");
+    // Controls (right side)
+    drawText(WINDOW_WIDTH - 240, WINDOW_HEIGHT - 25, "[1/2/3] Scenario");
+    drawText(WINDOW_WIDTH - 240, WINDOW_HEIGHT - 50, "[P] Toggle Algorithm");
+    drawText(WINDOW_WIDTH - 240, WINDOW_HEIGHT - 75, "[R] Reset");
+    drawText(WINDOW_WIDTH - 240, WINDOW_HEIGHT - 100, "[Space] Agitate");
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
@@ -423,7 +477,12 @@ void idle()
     if (g_pathReady.exchange(false))
     {
         std::lock_guard<std::mutex> lk(g_pathMutex);
-        simState.currentPath = g_pendingPath;
+        if (g_pendingEvent.pathFound)
+        {
+            simState.currentPath = g_pendingPath;
+            simState.pathUpdateCounter++;
+        }
+        simState.replanLog.push_back(g_pendingEvent);
     }
 
     updatePhysics(simState);
@@ -455,10 +514,28 @@ void idle()
 
     if (simState.goalReached)
     {
-        std::cout << "=== Run " << simState.runCount << " Complete ===" << std::endl;
-        std::cout << "Algorithm: " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
-        std::cout << "Time to goal: " << simState.elapsedTime << "s" << std::endl;
-        std::cout << "Path recomputes: " << simState.pathUpdateCounter << std::endl;
+        RunResult result = compileRunResult(
+            simState.currentScenario,
+            simState.useRRTStar,
+            simState.runCount,
+            true,
+            simState.elapsedTime,
+            simState.replanLog);
+
+        appendRunResultCSV(CSV_FILE, result);
+
+        std::cout << "\n=== Run " << simState.runCount << " Complete ===" << std::endl;
+        std::cout << "Scenario  : " << scenarioLabel(simState.currentScenario) << std::endl;
+        std::cout << "Algorithm : " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
+        std::cout << "Time      : " << simState.elapsedTime << " s" << std::endl;
+        std::cout << "Replans   : " << result.totalReplans
+                  << "  (failed: " << result.failedReplans << ")" << std::endl;
+        std::cout << "Plan time : avg=" << result.avgPlanTimeUs
+                  << " min=" << result.minPlanTimeUs
+                  << " max=" << result.maxPlanTimeUs << " us" << std::endl;
+        std::cout << "Path len  : " << result.avgPathLength << " (avg)" << std::endl;
+        std::cout << "Divergence: " << result.avgPathDivergence << " (avg)" << std::endl;
+        std::cout << "Saved to  : " << CSV_FILE << std::endl;
         std::cout << "===========================" << std::endl;
 
         simState.reset();
@@ -477,6 +554,14 @@ void idle()
     }
 
     glutPostRedisplay();
+}
+
+void resetSimulation()
+{
+    simState.reset();
+    for (int i = 0; i < simState.targgetParticleCount; i++)
+        simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
+    frameCounter = 0;
 }
 
 void keyboard(unsigned char key, int x, int y)
@@ -534,13 +619,26 @@ void keyboard(unsigned char key, int x, int y)
 
     case 'r':
     case 'R':
-        simState.reset();
-        for (int i = 0; i < simState.targgetParticleCount; i++)
-        {
-            simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
-        }
-        frameCounter = 0;
-        std::cout << "Simulation reset" << std::endl;
+        resetSimulation();
+        std::cout << "Simulation reset (" << scenarioLabel(simState.currentScenario) << ")" << std::endl;
+        break;
+
+    case '1':
+        simState.currentScenario = Scenario::PARTICLES_ONLY;
+        resetSimulation();
+        std::cout << "Scenario: Particles Only" << std::endl;
+        break;
+
+    case '2':
+        simState.currentScenario = Scenario::STATIC_OBSTACLES;
+        resetSimulation();
+        std::cout << "Scenario: Static Obstacles" << std::endl;
+        break;
+
+    case '3':
+        simState.currentScenario = Scenario::DYNAMIC_OBSTACLES;
+        resetSimulation();
+        std::cout << "Scenario: Dynamic Obstacles" << std::endl;
         break;
 
     case ' ':
@@ -560,12 +658,7 @@ void keyboard(unsigned char key, int x, int y)
     case 'P':
         simState.useRRTStar = !simState.useRRTStar;
         std::cout << "Switched to: " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
-        simState.reset();
-        for (int i = 0; i < simState.targgetParticleCount; i++)
-        {
-            simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
-        }
-        frameCounter = 0;
+        resetSimulation();
         glutPostRedisplay();
         break;
     }
@@ -632,6 +725,7 @@ void initSimulation()
     glCullFace(GL_BACK);
 
     glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
+    buildCubeList();
     simState.reset();
 
     for (int i = 0; i < simState.targgetParticleCount; i++)
@@ -645,21 +739,34 @@ void initSimulation()
     std::cout << "Box size: " << boxsize << "x" << boxsize << "x" << boxsize << std::endl;
     std::cout << std::endl;
     std::cout << "Controls:" << std::endl;
-    std::cout << "  W/S - Rotate camera up/down" << std::endl;
-    std::cout << "  A/D - Rotate camera left/right" << std::endl;
-    std::cout << "  +/- - Zoom in/out" << std::endl;
-    std::cout << "  R   - Reset simulation" << std::endl;
-    std::cout << "  Space - Agitate particles" << std::endl;
-    std::cout << "  Q/ESC - Quit" << std::endl;
+    std::cout << "  1       - Scenario: Particles Only" << std::endl;
+    std::cout << "  2       - Scenario: Static Obstacles" << std::endl;
+    std::cout << "  3       - Scenario: Dynamic Obstacles" << std::endl;
+    std::cout << "  P       - Toggle algorithm (A* / RRT*)" << std::endl;
+    std::cout << "  R       - Reset simulation" << std::endl;
+    std::cout << "  W/S/A/D - Rotate camera" << std::endl;
+    std::cout << "  +/-     - Zoom in/out" << std::endl;
+    std::cout << "  Space   - Agitate particles" << std::endl;
+    std::cout << "  Q/ESC   - Quit" << std::endl;
     std::cout << std::endl;
-    std::cout << "The green particle is the robot" << std::endl;
-    std::cout << "The red particle is the goal" << std::endl;
-    std::cout << "The magenta line is the computed path" << std::endl;
+    std::cout << "Results CSV : " << CSV_FILE << std::endl;
+    std::cout << "Metrics per run: time-to-goal, replans, plan-time (avg/min/max)," << std::endl;
+    std::cout << "                 path-length, path-divergence, failed-replans" << std::endl;
     std::cout << std::endl;
 }
 
 int main(int argc, char **argv)
 {
+    if (argc >= 2)
+    {
+        int n = std::atoi(argv[1]);
+        if (n > 0)
+            simState.targgetParticleCount = n;
+    }
+
+    initScaleFromParticleCount(simState.targgetParticleCount);
+    cameraDistance = boxsize * 2.2f;
+
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
