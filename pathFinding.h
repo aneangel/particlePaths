@@ -36,9 +36,9 @@ struct RRTNode
 struct KDNode
 {
     float x, y, z;
-    int   treeIdx; // index into the RRTNode vector
-    int   left;    // index in kd array, -1 if none
-    int   right;
+    int treeIdx;
+    int left;
+    int right;
 };
 
 struct Vec3Hash
