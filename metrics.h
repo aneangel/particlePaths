@@ -75,7 +75,8 @@ struct RunResult
 inline RunResult compileRunResult(
     Scenario scenario, bool useRRTStar, int runNumber,
     bool success, float timeToGoal,
-    const std::vector<ReplanEvent> &log)
+    const std::vector<ReplanEvent> &log,
+    int particleCount = 0)
 {
     RunResult r{};
     r.scenario = scenario;
@@ -120,7 +121,7 @@ inline RunResult compileRunResult(
     r.avgPathNodes = sumNodes / (float)n;
     r.avgPathDivergence = sumDiv / (float)n;
     r.failedReplans = failed;
-    r.particleCount = simState.particles.size();
+    r.particleCount = particleCount;
     return r;
 }
 

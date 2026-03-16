@@ -33,6 +33,14 @@ struct RRTNode
         : x(px), y(py), z(pz), cost(c), parent(p) {}
 };
 
+struct KDNode
+{
+    float x, y, z;
+    int   treeIdx; // index into the RRTNode vector
+    int   left;    // index in kd array, -1 if none
+    int   right;
+};
+
 struct Vec3Hash
 {
     std::size_t operator()(const std::tuple<int, int, int> &v) const

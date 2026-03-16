@@ -15,8 +15,14 @@
 #include "robot.h"
 #include "gpu_renderer.h"
 #include "metrics.h"
+#ifdef USE_CUDA
+#include "particle_cuda.h"
+#endif
 
 static const std::string CSV_FILE = "results.csv";
+static int  g_maxRuns  = 0;
+static bool g_headless = false;
+
 void initScaleFromParticleCount(int n)
 {
     float scale = std::cbrt((float)n / 1500.0f);
@@ -465,6 +471,105 @@ void agitateParticles()
     }
 }
 
+static void handleGoalReached(int &localFrameCounter)
+{
+    RunResult result = compileRunResult(
+        simState.currentScenario,
+        simState.useRRTStar,
+        simState.runCount,
+        true,
+        simState.elapsedTime,
+        simState.replanLog,
+        simState.particlesSpawned);
+
+    appendRunResultCSV(CSV_FILE, result);
+
+    std::cout << "\n=== Run " << simState.runCount << " Complete ===" << std::endl;
+    std::cout << "Scenario  : " << scenarioLabel(simState.currentScenario) << std::endl;
+    std::cout << "Algorithm : " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
+    std::cout << "Time      : " << simState.elapsedTime << " s" << std::endl;
+    std::cout << "Replans   : " << result.totalReplans
+              << "  (failed: " << result.failedReplans << ")" << std::endl;
+    std::cout << "Plan time : avg=" << result.avgPlanTimeUs
+              << " min=" << result.minPlanTimeUs
+              << " max=" << result.maxPlanTimeUs << " us" << std::endl;
+    std::cout << "Path len  : " << result.avgPathLength << " (avg)" << std::endl;
+    std::cout << "Divergence: " << result.avgPathDivergence << " (avg)" << std::endl;
+    std::cout << "Saved to  : " << CSV_FILE << std::endl;
+    std::cout << "===========================" << std::endl;
+
+    if (g_maxRuns > 0 && simState.runCount >= g_maxRuns)
+    {
+        if (!g_headless)
+            glutIdleFunc(nullptr);
+#ifdef USE_CUDA
+        cuda_cleanupPhysics();
+#endif
+        if (!g_headless)
+            cleanupGPU();
+        exit(0);
+    }
+
+    simState.reset();
+    for (int i = 0; i < simState.targgetParticleCount; i++)
+        simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
+    localFrameCounter = 0;
+}
+
+void runHeadless()
+{
+    int frameCounter = 0;
+
+    while (true)
+    {
+        if (g_pathReady.exchange(false))
+        {
+            std::lock_guard<std::mutex> lk(g_pathMutex);
+            if (g_pendingEvent.pathFound)
+            {
+                simState.currentPath = g_pendingPath;
+                simState.pathUpdateCounter++;
+            }
+            simState.replanLog.push_back(g_pendingEvent);
+        }
+
+#ifdef USE_CUDA
+        updateObstacles(simState);
+        cuda_updatePhysics(simState);
+#else
+        updatePhysics(simState);
+#endif
+        initializeRobotAndGoal(simState);
+
+        if (simState.particlesSpawned >= simState.targgetParticleCount && !simState.initialAgitationDone)
+        {
+            simState.settlingFrames++;
+            if (simState.settlingFrames == 1)
+                agitateParticles();
+            if (simState.settlingFrames >= 200)
+            {
+                simState.initialAgitationDone = true;
+                std::cout << "Particles settled, selecting robot and goal" << std::endl;
+            }
+        }
+
+        updateRobotControl(simState);
+
+        if (simState.robotParticle >= 0 && simState.goalParticle >= 0 && !simState.goalReached)
+            simState.elapsedTime += timeStep;
+
+        if (simState.goalReached)
+            handleGoalReached(frameCounter);
+
+        frameCounter++;
+        if (frameCounter >= 10)
+        {
+            frameCounter = 0;
+            launchPlannerAsync();
+        }
+    }
+}
+
 void idle()
 {
     static auto lastTick = std::chrono::steady_clock::now();
@@ -485,7 +590,12 @@ void idle()
         simState.replanLog.push_back(g_pendingEvent);
     }
 
+#ifdef USE_CUDA
+    updateObstacles(simState);
+    cuda_updatePhysics(simState);
+#else
     updatePhysics(simState);
+#endif
     initializeRobotAndGoal(simState);
 
     if (simState.particlesSpawned >= simState.targgetParticleCount && !simState.initialAgitationDone)
@@ -513,38 +623,7 @@ void idle()
     }
 
     if (simState.goalReached)
-    {
-        RunResult result = compileRunResult(
-            simState.currentScenario,
-            simState.useRRTStar,
-            simState.runCount,
-            true,
-            simState.elapsedTime,
-            simState.replanLog);
-
-        appendRunResultCSV(CSV_FILE, result);
-
-        std::cout << "\n=== Run " << simState.runCount << " Complete ===" << std::endl;
-        std::cout << "Scenario  : " << scenarioLabel(simState.currentScenario) << std::endl;
-        std::cout << "Algorithm : " << (simState.useRRTStar ? "RRT*" : "A*") << std::endl;
-        std::cout << "Time      : " << simState.elapsedTime << " s" << std::endl;
-        std::cout << "Replans   : " << result.totalReplans
-                  << "  (failed: " << result.failedReplans << ")" << std::endl;
-        std::cout << "Plan time : avg=" << result.avgPlanTimeUs
-                  << " min=" << result.minPlanTimeUs
-                  << " max=" << result.maxPlanTimeUs << " us" << std::endl;
-        std::cout << "Path len  : " << result.avgPathLength << " (avg)" << std::endl;
-        std::cout << "Divergence: " << result.avgPathDivergence << " (avg)" << std::endl;
-        std::cout << "Saved to  : " << CSV_FILE << std::endl;
-        std::cout << "===========================" << std::endl;
-
-        simState.reset();
-        for (int i = 0; i < simState.targgetParticleCount; i++)
-        {
-            simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
-        }
-        frameCounter = 0;
-    }
+        handleGoalReached(frameCounter);
 
     frameCounter++;
     if (frameCounter >= 10)
@@ -575,6 +654,9 @@ void keyboard(unsigned char key, int x, int y)
     case 'Q':
     case 27: // ESC
         glutIdleFunc(nullptr);
+#ifdef USE_CUDA
+        cuda_cleanupPhysics();
+#endif
         cleanupGPU();
         exit(0);
         break;
@@ -721,17 +803,24 @@ void motion(int x, int y)
 
 void initSimulation()
 {
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
+    if (!g_headless)
+    {
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
+        buildCubeList();
+    }
 
-    glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
-    buildCubeList();
     simState.reset();
 
     for (int i = 0; i < simState.targgetParticleCount; i++)
     {
         simState.particles.push_back(Particle(0.0f, 0.0f, 0.0f));
     }
+
+#ifdef USE_CUDA
+    cuda_initPhysics(simState.targgetParticleCount);
+#endif
 
     std::cout << "Particle System with Dynamic Pathfinding" << std::endl;
     std::cout << "=========================================" << std::endl;
@@ -757,14 +846,33 @@ void initSimulation()
 
 int main(int argc, char **argv)
 {
-    if (argc >= 2)
+    for (int i = 1; i < argc; i++)
     {
-        int n = std::atoi(argv[1]);
-        if (n > 0)
-            simState.targgetParticleCount = n;
+        if (std::string(argv[i]) == "--headless")
+            g_headless = true;
+    }
+
+    int posIdx = 0;
+    for (int i = 1; i < argc; i++)
+    {
+        if (std::string(argv[i]) == "--headless")
+            continue;
+        posIdx++;
+        if (posIdx == 1) { int n = std::atoi(argv[i]); if (n > 0) simState.targgetParticleCount = n; }
+        else if (posIdx == 2) { int s = std::atoi(argv[i]); if (s >= 1 && s <= 3) simState.currentScenario = static_cast<Scenario>(s - 1); }
+        else if (posIdx == 3) { simState.useRRTStar = (std::atoi(argv[i]) == 1); }
+        else if (posIdx == 4) { int r = std::atoi(argv[i]); if (r > 0) g_maxRuns = r; }
     }
 
     initScaleFromParticleCount(simState.targgetParticleCount);
+
+    if (g_headless)
+    {
+        initSimulation();
+        runHeadless();
+        return 0;
+    }
+
     cameraDistance = boxsize * 2.2f;
 
     glutInit(&argc, argv);
