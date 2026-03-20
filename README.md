@@ -53,6 +53,12 @@ make clean
 ./plannersim [particles] [scenario] [algorithm] [runs] [--headless]
 ```
 
+Optional flag for fair benchmarking with explicit failed runs:
+
+```sh
+./plannersim ... --max-run-seconds <seconds>
+```
+
 | Argument      | Description                                                                 | Default |
 |---------------|-----------------------------------------------------------------------------|---------|
 | `particles`   | Number of fluid particles                                                   | 1500    |
@@ -60,6 +66,7 @@ make clean
 | `algorithm`   | `0` = A\*, `1` = RRT\*                                                      | 0       |
 | `runs`        | Number of runs to complete before exiting (0 = run indefinitely)            | 0       |
 | `--headless`  | Run without a window (for benchmarking); can appear anywhere in the args    | off     |
+| `--max-run-seconds` | Max simulated seconds allowed per run before logging timeout failure | off     |
 
 **Examples:**
 
@@ -92,10 +99,16 @@ make clean
 
 ### Benchmarking
 
-The included `benchmark.sh` script sweeps over particle counts (500–25000), all three scenarios, and both algorithms, running 5 headless trials each and appending results to `results.csv`:
+The included `benchmark.sh` script sweeps over particle counts (500–25000), all three scenarios, and both algorithms, and runs a fixed number of attempts per condition with an explicit per-run timeout so failed runs are logged (reduces survivorship bias):
 
 ```sh
 ./benchmark.sh
+```
+
+Environment overrides:
+
+```sh
+RUNS=30 MAX_RUN_SECONDS=180 ./benchmark.sh
 ```
 
 After benchmarking, use the analysis script to generate plots and summary statistics:
@@ -104,7 +117,8 @@ After benchmarking, use the analysis script to generate plots and summary statis
 python analyse.py
 ```
 
-Results are saved to `results.csv` with columns: `scenario`, `algorithm`, `run_number`, `success`, `time_to_goal_s`, and additional performance metrics.
+`results.csv` includes both conditional and unconditional fields, including:
+`success`, `time_to_goal_s` (success-only), `run_time_s` (all runs), and `timed_out`.
 
 ---
 
